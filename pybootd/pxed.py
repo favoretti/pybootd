@@ -126,9 +126,11 @@ DHCP_OPTIONS = {  0: 'Byte padding',
                  72: 'World Wide Web servers',
                  73: 'Finger servers',
                  74: 'Internet Relay Chat server',
+                 77: 'User Class',
                  93: 'System architecture',
                  94: 'Network type',
                  97: 'UUID',
+                 175: 'iPXE encap opts',
                  255: 'End of DHCP options' }
 
 DHCP_DISCOVER = 1
@@ -181,6 +183,7 @@ class BootpServer:
         name_[0] = 'bootp'
         self.bootp_section = '_'.join(name_)
         self.pool_start = self.config.get(self.bootp_section, 'pool_start')
+        self.dhcp_home = self.config.get(self.bootp_section, 'dhcp_home')
         if not self.pool_start:
             raise BootpError('Missing pool_start definition')
         self.pool_count = int(self.config.get(self.bootp_section,
@@ -384,96 +387,30 @@ class BootpServer:
             if not simple_dhcp:
                return
 
-        # if access control is enable
-        if self.access:
-            # remote access is always validated on each request
-            if self.access in self.ACCESS_REMOTE:
-                # need to query a host to grant or reject access
-                import urlparse
-                import urllib
-                netloc = self.config.get(self.access, 'location')
-                path = self.config.get(self.access, pxe and 'pxe' or 'dhcp')
-                timeout = int(self.config.get(self.access, 'timeout', '5'))
-                parameters = {'mac' : mac_str}
-                if uuid:
-                    parameters['uuid'] = uuid_str
-                if not pxe and mac_str in self.ippool:
-                    parameters['ip'] = self.ippool[mac_str]
-                item = uuid_str or mac_str
-                # only bother the authentication host when a state change is
-                # required.
-                if currentstate != newstate:
-                    query = urllib.urlencode(parameters)
-                    urlparts = (self.access, netloc, path, query, '')
-                    url = urlparse.urlunsplit(urlparts)
-                    self.log.info('Requesting URL: %s' % url)
-                    import urllib2
-                    import httplib
-                    try:
-                        up = urllib2.urlopen(url, timeout=timeout)
-                        for l in up:
-                            try:
-                                # Look for extra definition within the reply
-                                k, v = [x.strip() for x in l.split(':')]
-                                k = k.lower()
-                                if k == 'client':
-                                    hostname = v
-                                if k == 'file':
-                                    filename = v
-                            except ValueError:
-                                pass
-                    except urllib2.HTTPError, e:
-                        self.log.error('HTTP Error: %s' % str(e))
-                        self.states[mac_str] = self.ST_IDLE
-                        return
-                    except urllib2.URLError, e:
-                        self.log.critical('Internal error: %s' % str(e))
-                        self.states[mac_str] = self.ST_IDLE
-                        return
-                    except httplib.HTTPException, e:
-                        self.log.error('Server error: %s' % type(e))
-                        self.states[mac_str] = self.ST_IDLE
-                        return
-            # local access is only validated if mac address is not yet known
-            elif mac_str not in self.ippool:
-                item = locals()['%s_str' % self.access]
-                if not item:
-                    self.log.info('Missing %s identifier, '
-                        'ignoring %s request' % (self.access, mac_str))
-                    return
-                if not item in self.acl:
-                    self.log.info('%s is not in ACL list, '
-                        'ignoring %s request' % (item, mac_str))
-                    return
-                if not self.acl[item]:
-                    self.log.info('%s access is disabled, '
-                        'ignoring %s request' % (item, mac_str))
-                    return
-            else:
-                item = locals()['%s_str' % self.access]
-            self.log.info('%s access is authorized, '
-                          'request will be satisfied' % item)
         # construct reply
         buf[BOOTP_OP] = BOOTREPLY
         self.log.info('Client IP: %s' % socket.inet_ntoa(buf[7]))
         if buf[BOOTP_CIADDR] == '\x00\x00\x00\x00':
             self.log.debug('Client needs its address')
-            ipaddr = iptoint(self.pool_start)
+            ipaddr = self.get_ip_for_mac(mac_str)
+            self.log.debug("IPADDR: {0}".format(ipaddr))
+            if not ipaddr:
+                self.log.error("Can't get IP address!")
+                return
             ip = None
             if mac_str in self.ippool:
                 ip = self.ippool[mac_str]
                 self.log.info('Lease for MAC %s already defined as IP %s' % \
                                 (mac_str, ip))
             else:
-                for idx in xrange(self.pool_count):
-                    ipkey = inttoip(ipaddr+idx)
-                    self.log.debug('Check for IP %s' % ipkey)
-                    if ipkey not in self.ippool.values():
-                        self.ippool[mac_str] = ipkey
-                        ip = ipkey
-                        break
+                self.ippool[mac_str] = ipaddr
+                ip = ipaddr
+
             if not ip:
-                raise BootpError('No more IP available in definined pool')
+                #raise BootpError('No more IP available in definined pool')
+                self.log.error("Can not find IP assigned to mac: %s" % mac_str)
+                return
+
             mask = iptoint(self.netconfig['mask'])
             reply_broadcast = iptoint(ip) & mask
             reply_broadcast |= (~mask)&((1<<32)-1)
@@ -530,13 +467,6 @@ class BootpServer:
             elif DHCP_RELEASE == dhcp_msg_type:
                 self._notify('RELEASE', uuid_str, mac_str, ip)
                 return
-
-        # Store the filename
-        if filename:
-            self.log.info("Filename for IP %s is '%s'" % (ip, filename))
-            self.filepool[ip] = filename
-        else:
-            self.log.debug('No filename defined for IP %s' % ip)
 
         pkt = struct.pack(DHCPFormat, *buf)
         pkt += struct.pack('!BBB', DHCP_MSG, 1, dhcp_reply)
@@ -599,3 +529,19 @@ class BootpServer:
         filename = self.filepool.get(ip, '')
         self.log.info("Filename for IP %s is '%s'" % (ip, filename))
         return filename
+
+    def get_ip_for_mac(self, mac_str):
+        self.log.debug("Ip requested for MAC: %s" % mac_str)
+        try:
+            hostname = open("%s/%s" % (self.dhcp_home, mac_str)).readline().strip()
+            self.log.debug("Will try to resolve: {host}".format(host=hostname))
+            try:
+                ipaddr = socket.gethostbyname(hostname)
+            except Exception, e:
+                self.log.debug("Resolving failed: {0}".format(e))
+                return
+            self.log.debug("Got IP for {host}: {ip}".format(ip=ipaddr, host=hostname))
+            return ipaddr
+        except IOError, e:
+            self.log.error("No file {dhcp_home}/{mac_str} found!".format(dhcp_home=self.dhcp_home, mac_str=mac_str))
+

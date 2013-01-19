@@ -32,6 +32,7 @@ from ConfigParser import NoSectionError
 from cStringIO import StringIO
 from pybootd import pybootd_path
 from util import hexline
+import logging
 
 __all__ = ['TftpServer']
 
@@ -53,7 +54,8 @@ class TftpConnection(object):
     HDRSIZE = 4  # number of bytes for OPCODE and BLOCK in header
 
     def __init__(self, server, port=0):
-        self.log = server.log
+        #self.log = server.log
+        self.log = logging.getLogger("tftpd")
         self.server = server
         self.client_addr = None
         self.sock = None
@@ -129,31 +131,9 @@ class TftpConnection(object):
         if ( opcode == self.RRQ ) or ( opcode == self.WRQ ):
             resource, mode, options = string.split(data[2:], '\000', 2)
             resource = self.server.fcre.sub(self._filter_file, resource)
-            if self.server.root and self.is_url(self.server.root):
+            self.log.debug("Resource: %s" % resource)
+            if self.server.root:
                 resource = '%s/%s' % (self.server.root, resource)
-            else:
-                try:
-                    resource = pybootd_path(resource)
-                except IOError:
-                    if not self.server.genfilecre.match(resource):
-                        if resource.startswith('^%s' % os.sep):
-                            resource = os.path.join( \
-                                os.path.dirname(sys.argv[0]),
-                                    resource.lstrip('^%s' % os.sep))
-                        elif self.server.root:
-                            if self.server.root.startswith(os.sep):
-                                # Absolute root directory
-                                resource = os.path.join(self.server.root,
-                                                        resource)
-                            else:
-                                # Relative root directory, from the daemon path
-                                daemonpath = os.path.dirname(sys.argv[0])
-                                if not daemonpath.startswith(os.sep):
-                                    daemonpath = os.path.normpath( \
-                                        os.path.join(os.getcwd(), daemonpath))
-                                resource = os.path.join(daemonpath,
-                                        self.server.root, resource)
-                        resource = os.path.normpath(resource)
             self.log.info("Resource '%s'" % resource)
             pkt['filename'] = resource
             pkt['mode'] = mode
@@ -377,9 +357,10 @@ class TftpConnection(object):
     def handle_err(self, pkt):
         self.log.info('Error packet: %s' % hexline(pkt['errtxt']))
 
-    @staticmethod
-    def is_url(path):
-        return urlparse.urlsplit(path)['scheme'] and True or False
+    def is_url(self, path):
+        self.log.debug(path)
+        self.log.debug(urlparse.urlsplit(path))
+        return urlparse.urlsplit(path).scheme and True or False
 
 
 class TftpServer:

@@ -37,10 +37,14 @@ def _get_package_name(default='', version='1.5.0'):
                 if _path == os.path.abspath(dist.location).lower():
                     return dist.project_name, dist.version
     return default, version
+
+
 PRODUCT_NAME, __version__ = _get_package_name('pybootd')
+
 
 def pybootd_path(path):
     newpath = ''
+    print path
     if path.startswith(os.sep):
         newpath = path
     elif os.path.exists(path):
