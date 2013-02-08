@@ -340,6 +340,8 @@ class BootpServer:
 
         server_addr = self.netconfig['server']
         mac_addr = buf[BOOTP_CHADDR][:6]
+        gi_addr = buf[BOOTP_GIADDR]
+        self.log.debug("Gateway address: %s" % gi_addr)
         mac_str = '-'.join(['%02X' % ord(x) for x in mac_addr])
         # is the UUID received (PXE mode)
         if 97 in options and len(options[97]) == 17:
@@ -452,6 +454,9 @@ class BootpServer:
                 return
         elif dhcp_msg_type == DHCP_INFORM:
             self.log.info('DHCP INFORM')
+            return
+        elif dhcp_msg_type == DHCP_DECLINE:
+            self.log.debug('DHCP DECLINE')
             return
         else:
             self.log.error('Unmanaged DHCP message: %d' % dhcp_msg_type)
