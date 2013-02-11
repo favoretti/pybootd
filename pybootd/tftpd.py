@@ -31,7 +31,7 @@ import urlparse
 from ConfigParser import NoSectionError
 from cStringIO import StringIO
 from pybootd import pybootd_path
-from util import hexline
+from util import hexline, get_iface_config
 import logging
 
 __all__ = ['TftpServer']
@@ -53,9 +53,9 @@ class TftpConnection(object):
     OACK = 6
     HDRSIZE = 4  # number of bytes for OPCODE and BLOCK in header
 
-    def __init__(self, server, port=0):
+    def __init__(self, server, port=0, logger=None):
         #self.log = server.log
-        self.log = logging.getLogger("tftpd")
+        self.log = logger or logging.getLogger()
         self.server = server
         self.client_addr = None
         self.sock = None
@@ -130,7 +130,7 @@ class TftpConnection(object):
         opcode = pkt['opcode'] = unpack('!h', buf[:2])[0]
         if ( opcode == self.RRQ ) or ( opcode == self.WRQ ):
             resource, mode, options = string.split(data[2:], '\000', 2)
-            resource = self.server.fcre.sub(self._filter_file, resource)
+            #resource = self.server.fcre.sub(self._filter_file, resource)
             self.log.debug("Resource: %s" % resource)
             if self.server.root:
                 resource = '%s/%s' % (self.server.root, resource)
@@ -283,7 +283,9 @@ class TftpConnection(object):
         self.log.debug('handle_rrq')
         resource = pkt['filename']
         mode = pkt['mode']
-        genfile = self.server.genfilecre.match(resource)
+        # FIXME: Decide whether we need that or not
+        genfile = None
+        #genfile = self.server.genfilecre.match(resource)
         if 'tsize' in pkt and int(pkt['tsize']) == 0:
             if genfile:
                 filesize = len(genfile.group('name'))
@@ -374,20 +376,21 @@ class TftpServer:
         self.config = config
         self.sock = []
         self.bootpd = bootpd
-        self.blocksize = int(self.config.get('tftp', 'blocksize', '512'))
-        self.timeout = float(self.config.get('tftp', 'timeout', '2.0'))
-        self.retry = int(self.config.get('tftp', 'blocksize', '5'))
-        self.root = self.config.get('tftp', 'root', os.getcwd())
-        self.fcre, self.filepatterns = self.get_file_filters()
-        self.genfilecre = re.compile(r'\[(?P<name>[\w\.\-]+)\]')
+        self.blocksize = int(self.config.get_tftp_blocksize())
+        self.timeout = float(self.config.get_tftp_timeout())
+        self.root = self.config.get_tftp_root()
+        self.retry = 5
+
+        # Nice idea, not needed for us for now, disabled
+        #self.fcre, self.filepatterns = self.get_file_filters()
+        #self.genfilecre = re.compile(r'\[(?P<name>[\w\.\-]+)\]')
 
     def bind(self):
-        netconfig = self.bootpd and self.bootpd.get_netconfig()
-        host = self.config.get('tftp', 'address',
-                               netconfig and netconfig['server'])
+        netconfig = get_iface_config(self.config.get_tftp_bind_interface())
+        host = netconfig and netconfig['address']
         if not host:
-            raise TftpError('TFTP address no defined')
-        port = int(self.config.get('tftp', 'port', str(TFTP_PORT)))
+            raise TftpError('TFTP address not defined')
+        port = int(self.config.get_tftp_port())
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock.append(sock)
         sock.bind((host, port))
@@ -397,7 +400,7 @@ class TftpServer:
             r,w,e = select.select(self.sock, [], self.sock)
             for sock in r:
                 data, addr = sock.recvfrom(516)
-                t = TftpConnection(self)
+                t = TftpConnection(self, logger=self.log)
                 thread.start_new_thread(t.connect, (addr, data))
 
     def filter_file(self, connexion, mo):

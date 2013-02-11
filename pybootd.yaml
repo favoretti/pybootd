@@ -1,0 +1,17 @@
+logger:
+    type: stderr
+    level: debug
+
+bootp:
+    bind_interface: eth0
+    allow_simple_dhcp: true
+    default_boot_file: pietje.0
+    default_dns: auto
+    #acl: (http|mac|uuid) -> this one is not used for now
+
+tftp:
+    bind_interface: eth0
+    root: /srv/tftp
+
+bootp_leases:
+    '00:50:56:00:0D:A5': be001.dro.sm.smintegration.mp.ecg.so

@@ -122,30 +122,28 @@ def iptoint(ipstr):
 def inttoip(ipval):
     return socket.inet_ntoa(struct.pack('!I', ipval))
 
-def get_iface_config(address):
-    if not address:
+def get_iface_config(interface):
+    if not interface:
         return None
     try:
         import netifaces
     except ImportError:
         raise AssertionError("netifaces module is not installed")
-    pool = iptoint(address)
-    for iface in netifaces.interfaces():
-        ifinfo = netifaces.ifaddresses(iface)
-        if netifaces.AF_INET not in ifinfo:
-            continue
-        for inetinfo in netifaces.ifaddresses(iface)[netifaces.AF_INET]:
-            addr = iptoint(inetinfo['addr'])
-            mask = iptoint(inetinfo['netmask'])
-            ip = addr & mask
-            ip_client = pool & mask
-            delta = ip ^ ip_client
-            if not delta:
-                config = { 'ifname': iface,
-                           'server': inttoip(addr),
-                           'net': inttoip(ip),
-                           'mask': inttoip(mask) }
-                return config
+    if not interface in netifaces.interfaces():
+        raise AssertionError("Interface {interface} does not exist, check your configuration!".format(interface=interface))
+    ifinfo = netifaces.ifaddresses(interface)
+    if netifaces.AF_INET not in ifinfo:
+        raise AssertionError("Interface {interface} is not a valid interface!".format(interface=interface))
+
+    for inetinfo in ifinfo[netifaces.AF_INET]:
+        addr = iptoint(inetinfo['addr'])
+        mask = iptoint(inetinfo['netmask'])
+        ip = addr & mask
+        config = { 'ifname': interface,
+                   'address': inttoip(addr),
+                   'net': inttoip(ip),
+                   'mask': inttoip(mask) }
+        return config
     return None
 
 class EasyConfigParser(SafeConfigParser):

@@ -1,0 +1,13 @@
+logger:
+    type: stderr
+    level: debug
+
+bootp:
+    bind_interface: eth0
+    allow_simple_dhcp: true
+    default_boot_file: pietje.0
+    #acl: (http|mac|uuid) -> this one is not used for now
+
+tftp:
+    bind_interface: eth0
+    root: /srv/tftp

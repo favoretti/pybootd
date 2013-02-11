@@ -24,11 +24,12 @@ import string
 import struct
 import sys
 import time
+import pybootdconfig
 from binascii import hexlify
 from pybootd import PRODUCT_NAME
 from util import hexline, to_bool, iptoint, inttoip, get_iface_config
 
-BOOTP_PORT_REQUEST = 67
+BOOTP_PORT_REQUEST = pybootdconfig.BOOTP_PORT
 BOOTP_PORT_REPLY = 68
 
 BOOTREQUEST = 1
@@ -181,30 +182,13 @@ class BootpServer:
         self.states = {} # key MAC address string, value client state
         name_ = PRODUCT_NAME.split('-')
         name_[0] = 'bootp'
-        self.bootp_section = '_'.join(name_)
-        self.pool_start = self.config.get(self.bootp_section, 'pool_start')
-        self.dhcp_home = self.config.get(self.bootp_section, 'dhcp_home')
-        if not self.pool_start:
-            raise BootpError('Missing pool_start definition')
-        self.pool_count = int(self.config.get(self.bootp_section,
-                              'pool_count', '10'))
-        self.netconfig = get_iface_config(self.pool_start)
+        self.netconfig = get_iface_config(self.config.get_bootp_bind_interface())
         if not self.netconfig:
             raise BootpError('Unable to detect network configuration')
         keys = sorted(self.netconfig.keys())
         self.log.info('Using %s' % ', '.join(map(':'.join,
                                 zip(keys, [self.netconfig[k] for k in keys]))))
-        nlist = self.config.get(self.bootp_section, 'notify')
-        self.notify = []
-        if nlist:
-            try:
-                nlist = nlist.split(';')
-                for n in nlist:
-                    n = n.strip().split(':')
-                    self.notify.append((n[0], int(n[1])))
-            except Exception, e:
-                raise BootpError('Invalid notification URL: %s' % str(e))
-        access = self.config.get(self.bootp_section, 'access')
+        access = self.config.get_bootp_acl_type()
         if not access:
             self.acl = None
         else:
@@ -220,25 +204,13 @@ class BootpServer:
                         to_bool(self.config.get(access, entry))
         self.access = access
 
-    # Private
-    def _notify(self, notice, uuid_str, mac_str, ip):
-        if uuid_str:
-            msg = ','.join([notice, uuid_str, mac_str, ip])
-        else:
-            msg = ','.join([notice, mac_str, ip])
-        notify_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        for n in self.notify:
-            self.log.info('Notifying %s with %s' % (n, msg))
-            notify_sock.sendto(msg, n)
-
     # Public
     def get_netconfig(self):
         return self.netconfig
 
     def bind(self):
-        host = self.config.get(self.bootp_section, 'address', '0.0.0.0')
-        port = self.config.get(self.bootp_section, 'port',
-                               str(BOOTP_PORT_REQUEST))
+        host = self.netconfig['address']
+        port = self.config.get_bootp_port()
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM,
                              socket.IPPROTO_UDP)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
@@ -339,10 +311,10 @@ class BootpServer:
         except KeyError:
             dhcp_msg_type = None
 
-        server_addr = self.netconfig['server']
+        server_addr = self.netconfig['address']
         mac_addr = buf[BOOTP_CHADDR][:6]
         gi_addr = buf[BOOTP_GIADDR][:4]
-        mac_str = '-'.join(['%02X' % ord(x) for x in mac_addr])
+        mac_str = ':'.join(['%02X' % ord(x) for x in mac_addr])
         gi_str = '.'.join(['%d' % ord(x) for x in gi_addr])
         self.log.debug("Gateway address: %s" % gi_str)
         # is the UUID received (PXE mode)
@@ -384,10 +356,8 @@ class BootpServer:
         # if the state has not evolved from idle, there is nothing to do
         if newstate == self.ST_IDLE:
             self.log.info('Request from %s ignored (idle state)' % mac_str)
-            sdhcp = 'allow_simple_dhcp'
-            simple_dhcp = \
-                self.config.has_option(self.bootp_section, sdhcp) and \
-                to_bool(self.config.get(self.bootp_section, sdhcp))
+            sdhcp = self.config.get_bootp_allow_simple_dhcp()
+            simple_dhcp = shdcp and to_bool(sdhcp)
             if not simple_dhcp:
                return
 
@@ -396,7 +366,9 @@ class BootpServer:
         self.log.info('Client IP: %s' % socket.inet_ntoa(buf[7]))
         if buf[BOOTP_CIADDR] == '\x00\x00\x00\x00':
             self.log.debug('Client needs its address')
-            ipaddr = self.get_ip_for_mac(mac_str)
+            host_data = self.get_host_data_for_mac(mac_str)
+            ipaddr = host_data['address']
+
             self.log.debug("IPADDR: {0}".format(ipaddr))
             if not ipaddr:
                 self.log.error("Can't get IP address!")
@@ -432,13 +404,10 @@ class BootpServer:
             buf[BOOTP_GIADDR] = socket.inet_aton(gi_str)
         # sname
         buf[BOOTP_SNAME] = \
-            '.'.join([self.config.get(self.bootp_section,
-                                      'servername', 'unknown'),
-                      self.config.get(self.bootp_section,
-                                      'domain', 'localdomain')])
+            '.'.join([host_data['hostname'], host_data['domain']])
         # file
-        buf[BOOTP_FILE] = self.config.get(self.bootp_section,
-                                          'boot_file', '\x00')
+        # FIXME: for now serve only default boot file
+        buf[BOOTP_FILE] = self.config.get_bootp_default_boot_file()
 
         if not dhcp_msg_type:
             self.log.warn('No DHCP message type found, discarding request')
@@ -467,17 +436,6 @@ class BootpServer:
             self.log.error('Unmanaged DHCP message: %d' % dhcp_msg_type)
             return
 
-        # notify the sequencer
-        if self.notify:
-            if DHCP_REQUEST == dhcp_msg_type:
-                if 97 in options:
-                    self._notify('BOOT', uuid_str, mac_str, ip)
-                else:
-                    self._notify('LEASE', uuid_str, mac_str, ip)
-            elif DHCP_RELEASE == dhcp_msg_type:
-                self._notify('RELEASE', uuid_str, mac_str, ip)
-                return
-
         pkt = struct.pack(DHCPFormat, *buf)
         pkt += struct.pack('!BBB', DHCP_MSG, 1, dhcp_reply)
         #server = socket.inet_aton(server_addr)
@@ -487,16 +445,16 @@ class BootpServer:
         mask = socket.inet_aton('255.255.255.224')
         pkt += struct.pack('!BB4s', DHCP_IP_MASK, 4, mask)
         pkt += struct.pack('!BB4s', DHCP_IP_GATEWAY, 4, server)
-        dns = self.config.get(self.bootp_section,
-                              'dns', None)
+        # FIXME: Serving only default DNS for now
+        dns = self.config.get_bootp_default_dns()
+
         if dns:
             if dns.lower() == 'auto':
                 dns = self.get_dns_server() or socket.inet_ntoa(server)
             dns = socket.inet_aton(dns)
             pkt += struct.pack('!BB4s', DHCP_IP_DNS, 4, dns)
         pkt += struct.pack('!BBI', DHCP_LEASE_TIME, 4,
-                           int(self.config.get(self.bootp_section, 'lease_time',
-                                               str(24*3600))))
+                           int(self.config.get_bootp_default_lease_time()))
         pkt += struct.pack('!BB', DHCP_END, 0)
 
         # do not attempt to produce a PXE-augmented response for
@@ -545,10 +503,14 @@ class BootpServer:
         self.log.info("Filename for IP %s is '%s'" % (ip, filename))
         return filename
 
-    def get_ip_for_mac(self, mac_str):
-        self.log.debug("Ip requested for MAC: %s" % mac_str)
+    def get_host_data_for_mac(self, mac_str):
+        self.log.debug("Host data requested for MAC: %s" % mac_str)
         try:
-            hostname = open("%s/%s" % (self.dhcp_home, mac_str)).readline().strip()
+            hostname = self.config.get_lease_for_mac(mac_str)
+            if not hostname:
+                self.log.error("No hostname defined for mac: {mac}".format(mac=mac_str))
+                return
+
             self.log.debug("Will try to resolve: {host}".format(host=hostname))
             try:
                 ipaddr = socket.gethostbyname(hostname)
@@ -556,7 +518,12 @@ class BootpServer:
                 self.log.debug("Resolving failed: {0}".format(e))
                 return
             self.log.debug("Got IP for {host}: {ip}".format(ip=ipaddr, host=hostname))
-            return ipaddr
+            hostdata = {}
+            hostdata['address'] = ipaddr
+            hostdata['hostname'] = hostname
+            hostdata['domain'] = ".".join(hostname.strip().split(".")[1:])
+            print hostdata
+            return hostdata
         except IOError, e:
             self.log.error("No file {dhcp_home}/{mac_str} found!".format(dhcp_home=self.dhcp_home, mac_str=mac_str))
 

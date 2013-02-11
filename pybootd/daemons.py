@@ -21,6 +21,7 @@
 from optparse import OptionParser
 from pxed import BootpServer
 from pybootd import pybootd_path, PRODUCT_NAME, __version__ as VERSION
+from pybootdconfig import PyBootdConfig
 from tftpd import TftpServer
 from util import logger_factory, EasyConfigParser
 import os
@@ -61,7 +62,7 @@ def main():
             '   PXE boot up server, a tiny BOOTP/DHCP/TFTP server'
     optparser = OptionParser(usage=usage)
     optparser.add_option('-c', '--config', dest='config',
-                         default='pybootd/etc/pybootd.ini',
+                         default='pybootd.yaml',
                          help='configuration file')
     optparser.add_option('-p', '--pxe', dest='pxe', action='store_true',
                          help='enable BOOTP/DHCP/PXE server only')
@@ -75,22 +76,23 @@ def main():
     if options.pxe and options.tftp:
         raise AssertionError('Cannot exclude both servers')
 
-    cfgparser = EasyConfigParser()
-    with open(pybootd_path(options.config), 'rt') as config:
-        cfgparser.readfp(config)
+    #cfgparser = EasyConfigParser()
+    config = PyBootdConfig(options.config)
+    #with open(pybootd_path(options.config), 'rt') as config:
+    #    cfgparser.readfp(config)
 
-    logger = logger_factory(logtype=cfgparser.get('logger', 'type', 'stderr'),
-                            logfile=cfgparser.get('logger', 'file'),
-                            level=cfgparser.get('logger', 'level', 'info'))
+    logger = logger_factory(logtype=config.get_logger_type(),
+                            logfile=config.get_logger_file(),
+                            level=config.get_logger_level())
     logger.info('-'.join((PRODUCT_NAME, VERSION)))
     try:
-        if not options.tftp:
-            bt = BootpDaemon(logger, cfgparser)
+        if not options.tftp or not config.enable_tftp:
+            bt = BootpDaemon(logger, config)
             bt.start()
         else:
             bt = None
-        if not options.pxe:
-            ft = TftpDaemon(logger, cfgparser, bt)
+        if not options.pxe or not config.enable_bootp:
+            ft = TftpDaemon(logger, config, bt)
             ft.start()
         while True:
             import time
