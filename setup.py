@@ -3,6 +3,7 @@
 #
 # Copyright (c) 2010-2011 Emmanuel Blot <emmanuel.blot@free.fr>
 # Copyright (c) 2010-2011 Neotion
+# Copyright (c) 2012-2013 Vladimir Lazarenko <favoretti@gmail.com>
 #
 # This library is free software; you can redistribute it and/or
 # modify it under the terms of the GNU Lesser General Public
@@ -29,14 +30,14 @@ setup(
     name='pybootd',
     version='1.5.0',
     description='Simplified BOOTP/DHCP/PXE and TFTP server',
-    author='Emmanuel Blot',
-    author_email='emmanuel.blot@free.fr',
+    author='Vladimir Lazarenko',
+    author_email='favoretti@gmail.com',
     license='LGPL v2',
-    keywords = 'bootp ftdp dhcp pxe netboot',
-    url='http://github.com/eblot/pybootd',
-    download_url='https://github.com/eblot/pybootd/tarball/master',
+    keywords = 'bootp tftdp dhcp pxe netboot',
+    url='http://github.com/favoretti/pybootd',
+    download_url='https://github.com/favoretti/pybootd/tarball/master',
     packages=['pybootd'],
-    requires=['netifaces (>= 0.5)'],
+    requires=['netifaces (>= 0.5)', 'yaml'],
     classifiers=[
         'Development Status :: 4 - Beta',
         'Environment :: No Input/Output (Daemon)',
@@ -53,8 +54,8 @@ setup(
         'Topic :: System :: Networking',
         'Topic :: Utilities'
     ],
-    package_data = {
-        '': ['etc/*.ini', 'etc/*.cfg'],
-    },
-    long_description=_read('README.rst'),
+    #package_data = {
+    #    '': ['etc/*.ini', 'etc/*.cfg'],
+    #},
+    long_description=_read('README.md'),
 )
