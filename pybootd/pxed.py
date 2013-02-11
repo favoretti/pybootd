@@ -440,6 +440,13 @@ class BootpServer:
         pkt = struct.pack(DHCPFormat, *buf)
         pkt += struct.pack('!BBB', DHCP_MSG, 1, dhcp_reply)
         #server = socket.inet_aton(server_addr)
+        # FIXME: Hardcoded relay and netmask
+        # Add something in lines of:
+        # networks:
+        #     10.40.13.160:
+        #         netmask: 255.255.255.224
+        #         gateway: 10.40.13.160
+        #         dns: 10.40.1.80, 10.40.1.81
         server = socket.inet_aton('10.40.13.161')
         pkt += struct.pack('!BB4s', DHCP_SERVER, 4, server)
         #mask = socket.inet_aton(self.netconfig['mask'])
