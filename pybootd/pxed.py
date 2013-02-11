@@ -319,6 +319,7 @@ class BootpServer:
         return buf
 
     def handle(self, sock, addr, data):
+        sender = addr
         self.log.info('Sender: %s on socket %s' % (addr, sock.getsockname()))
         if len(data) < DHCPFormatSize:
             self.log.error('Cannot be a DHCP or BOOTP request - too small!')
@@ -340,9 +341,10 @@ class BootpServer:
 
         server_addr = self.netconfig['server']
         mac_addr = buf[BOOTP_CHADDR][:6]
-        gi_addr = buf[BOOTP_GIADDR]
-        self.log.debug("Gateway address: %s" % gi_addr)
+        gi_addr = buf[BOOTP_GIADDR][:4]
         mac_str = '-'.join(['%02X' % ord(x) for x in mac_addr])
+        gi_str = '.'.join(['%d' % ord(x) for x in gi_addr])
+        self.log.debug("Gateway address: %s" % gi_str)
         # is the UUID received (PXE mode)
         if 97 in options and len(options[97]) == 17:
             uuid = options[97][1:]
@@ -424,7 +426,10 @@ class BootpServer:
         else:
             buf[BOOTP_YIADDR] = buf[BOOTP_CIADDR]
             ip = socket.inet_ntoa(buf[BOOTP_YIADDR])
-        buf[BOOTP_SIADDR] = buf[BOOTP_GIADDR] = socket.inet_aton(server_addr)
+        buf[BOOTP_SIADDR] = socket.inet_aton(server_addr)
+        if gi_addr:
+            self.log.debug('Reply via gateway: %s' % gi_str)
+            buf[BOOTP_GIADDR] = socket.inet_aton(gi_str)
         # sname
         buf[BOOTP_SNAME] = \
             '.'.join([self.config.get(self.bootp_section,
@@ -475,9 +480,11 @@ class BootpServer:
 
         pkt = struct.pack(DHCPFormat, *buf)
         pkt += struct.pack('!BBB', DHCP_MSG, 1, dhcp_reply)
-        server = socket.inet_aton(server_addr)
+        #server = socket.inet_aton(server_addr)
+        server = socket.inet_aton('10.40.13.161')
         pkt += struct.pack('!BB4s', DHCP_SERVER, 4, server)
-        mask = socket.inet_aton(self.netconfig['mask'])
+        #mask = socket.inet_aton(self.netconfig['mask'])
+        mask = socket.inet_aton('255.255.255.224')
         pkt += struct.pack('!BB4s', DHCP_IP_MASK, 4, mask)
         pkt += struct.pack('!BB4s', DHCP_IP_GATEWAY, 4, server)
         dns = self.config.get(self.bootp_section,
@@ -506,7 +513,10 @@ class BootpServer:
             self.uuidpool[mac_addr] = uuid
 
         # send the response
-        sock.sendto(pkt + extra_buf, addr)
+        if gi_addr:
+            sock.sendto(pkt + extra_buf, (gi_str, 67))
+        else:
+            sock.sendto(pkt + extra_buf, addr)
 
         # update the current state
         if currentstate != newstate:
