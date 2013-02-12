@@ -146,9 +146,9 @@ class TftpConnection(object):
                     self.timeout = float(value)
                 pkt[key] = value
         elif opcode == self.ACK:
-            block = pkt['block'] = unpack('!h', buf[2:4])[0]
+            block = pkt['block'] = unpack('!H', buf[2:4])[0]
         elif opcode == self.DATA:
-            block = pkt['block'] = unpack('!h', buf[2:4])[0]
+            block = pkt['block'] = unpack('!H', buf[2:4])[0]
             data = pkt['data'] = buf[4:]
         elif opcode == self.ERR:
             errnum = pkt['errnum'] = unpack('!h', buf[2:4])[0]
@@ -207,12 +207,13 @@ class TftpConnection(object):
 
     def recv_ack(self, pkt):
         self.log.debug('recv_ack')
+        self.log.debug('Received ack for block: {block}'.format(block=pkt['block]))
         if pkt['block'] == self.blockNumber:
             # We received the correct ACK
             self.handle_ack(pkt)
         else:
             self.log.warn('Expecting ACK for block %d, received %d' % \
-                            (pkt['block'], self.blockNumber))
+                            (self.blockNumber, pkt['block']))
 
     def recv_data(self, pkt):
         self.log.debug('recv_data')
@@ -232,8 +233,12 @@ class TftpConnection(object):
             self.time = time.time()
         blocksize = self.blocksize
         block = self.blockNumber = self.blockNumber + 1
+        if block > 65535:
+            block = self.blockNumber = 0
+
+        self.log.debug("Sending block number: {block}".format(block=block))
         lendata = len(data)
-        format = '!hh%ds' % lendata
+        format = '!hH%ds' % lendata
         pkt = pack(format, self.DATA, block, data)
         self.send(pkt)
         self.active = (len(data) == blocksize)
@@ -244,10 +249,10 @@ class TftpConnection(object):
                 name = self.file.name
                 size = os.stat(name)[6]
                 try:
-                    self.log.info('File %s send in %.1f s (%.2f MB/s)' % \
+                    self.log.info('File %s sent in %.1f s (%.2f MB/s)' % \
                                     (name, total, size/(total*1024*1024)))
                 except ZeroDivisionError:
-                    self.log.warn('File %s send in no time' % name)
+                    self.log.warn('File %s sent in no time' % name)
             except AttributeError:
                 # StringIO does not have a 'name' attribute
                 pass
@@ -260,7 +265,10 @@ class TftpConnection(object):
         self.log.debug('send_ack')
         block = self.blockNumber
         self.blockNumber = self.blockNumber + 1
-        format = '!hh'
+        if self.blockNumber > 65535:
+            self.blockNumber = 0
+
+        format = '!hH'
         pkt = pack(format, self.ACK, block)
         self.send(pkt)
 
@@ -307,7 +315,9 @@ class TftpConnection(object):
                           (resource, filesize))
             options = [('tsize', str(filesize))]
             if 'blksize' in pkt:
+                self.log.debug('Got block size request of: {size}'.format(size=pkt['blksize']))
                 options.append(('blksize', pkt['blksize']))
+
             self.send_oack(options)
         if genfile:
             self.log.info('Generating file content: %s', genfile.group('name'))
