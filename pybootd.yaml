@@ -11,7 +11,15 @@ bootp:
 
 tftp:
     bind_interface: eth0
-    root: /srv/tftp
+    root: /var/lib/tftpboot
+
+networks:
+    10.40.13.160:
+        netmask: 255.255.255.224
+        gateway: 10.40.13.161
+        dns: [10.40.1.80, 10.40.1.81]
 
 bootp_leases:
-    '00:50:56:00:0D:A5': be001.dro.sm.smintegration.mp.ecg.so
+    '00:50:56:00:0D:A5':
+        hostname: be001.dro.sm.smintegration.mp.ecg.so
+        boot_file: pxelinux.0

@@ -358,7 +358,7 @@ class BootpServer:
         if newstate == self.ST_IDLE:
             self.log.info('Request from %s ignored (idle state)' % mac_str)
             sdhcp = self.config.get_bootp_allow_simple_dhcp()
-            simple_dhcp = shdcp and to_bool(sdhcp)
+            simple_dhcp = sdhcp and to_bool(sdhcp)
             if not simple_dhcp:
                return
 
@@ -407,8 +407,7 @@ class BootpServer:
         buf[BOOTP_SNAME] = \
             '.'.join([host_data['hostname'], host_data['domain']])
         # file
-        # FIXME: for now serve only default boot file
-        buf[BOOTP_FILE] = self.config.get_bootp_default_boot_file()
+        buf[BOOTP_FILE] = 'boot_file' in host_data and host_data['boot_file'] or self.config.get_bootp_default_boot_file()
 
         if not dhcp_msg_type:
             self.log.warn('No DHCP message type found, discarding request')
@@ -514,7 +513,8 @@ class BootpServer:
     def get_host_data_for_mac(self, mac_str):
         self.log.debug("Host data requested for MAC: %s" % mac_str)
         try:
-            hostname = self.config.get_lease_for_mac(mac_str)
+            host_lease_data = self.config.get_lease_for_mac(mac_str)
+            hostname = 'hostname' in host_lease_data and host_lease_data['hostname']
             if not hostname:
                 self.log.error("No hostname defined for mac: {mac}".format(mac=mac_str))
                 return
@@ -530,6 +530,7 @@ class BootpServer:
             hostdata['address'] = ipaddr
             hostdata['hostname'] = hostname
             hostdata['domain'] = ".".join(hostname.strip().split(".")[1:])
+            hostdata['boot_file'] = host_lease_data['boot_file']
             print hostdata
             return hostdata
         except IOError, e:
